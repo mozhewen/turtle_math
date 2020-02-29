@@ -26,10 +26,9 @@ BeginPackage["Turtle`"];
 (*	"Arrow"[]*)
 (*	"Text"["text", offset]*)
 (*	"echo"["graphics_directives_string"]*)
-(**)
+(*	"on"[context]*)
+(*	"off"[context]*)
 (*(* TODO: *)*)
-(*	"begin"[context]*)
-(*	"end"[context]*)
 (*	Optimize using "SubstitutionSystem[]" and "AnglePath[]"?*)
 (*	Simplify usage of echo[]*)
 (*	...*)
@@ -38,19 +37,47 @@ BeginPackage["Turtle`"];
 ParseDirectives::usage = "Parse the turtle's directives to Mathematica compatible graphics primitives. ";
 ClearAll[ParseDirectives];
 Options[ParseDirectives] = {
-	InitialState -> {{0, 0}, 0} (* {pos, orient} *)
+	InitialState -> {{0, 0}, 0} (* {pos, orient} *),
+	WavyStyle -> {0.1, 0.1} (* {pitch, width} *)
 };
+
 
 Begin["`Private`"];
 
 Mod2\[Pi][x_] := Mod[x, 2\[Pi]];
 
+ClearAll[WavyLine];
+WavyLine[{p1_List, p2_List}, pitch_, width_] := Module[
+	{vec = p2-p1, pts, newHead, num},
+	num = Round[2 Norm[vec]/pitch];
+	pts = newHead@@p1 + Subdivide[If[num==0, 1, 2 num]]newHead@@vec;
+	If[num>0, pts[[2;;;;4]] += (newHead@@AngleVector[ArcTan@@vec+\[Pi]/2])width];
+    If[num>1, pts[[4;;;;4]] -= (newHead@@AngleVector[ArcTan@@vec+\[Pi]/2])width];
+    BSplineCurve[pts]/.newHead -> List
+]
+
+ClearAll[WavyCircle];
+WavyCircle[center_List, radius_, {\[Theta]1_, \[Theta]2_}, pitch_, width_] := Module[
+	{\[Delta] = \[Theta]2-\[Theta]1, pts, newHead, num},
+	num=Round[2 \[Delta] radius/pitch];
+	pts=(AngleVector/@(\[Theta]1+Subdivide[If[num==0,1,2num]]*\[Delta]));
+	If[num>0,pts[[2;;;;4]]*=(radius-width)/radius];
+	If[num>1,pts[[4;;;;4]]*=(radius+width)/radius];
+	BSplineCurve[newHead@@center+pts]/.newHead -> List
+]
+
+
 ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 	{
 		stateStack = {},
-		pos, orient, (* Stacked properties *)
-		marks=<||>, (* Unstacked properties *)
-		output = {CapForm["Round"]}, (* Initialized with global directives *)
+		(* Stacked properties *)
+		pos, orient,
+		(* Unstacked properties *)
+		marks = <||>,
+		LineFunc = Line, CircleFunc = Circle,
+		(* Output. Initialized with global directives *)
+		output = {CapForm["Round"]},
+
 		ParseDirectivesRecur
 	},
 	(* Define recursion function *)
@@ -64,11 +91,11 @@ ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 			(* 1. *)
 			"Forward",
 				AppendTo[output,
-					Line[{pos, pos += AngleVector[orient]directive[[1]]}]
-				];,
-			"forward",
-				pos += AngleVector[orient]directive[[1]];,
-			"Bend",
+					LineFunc[{pos, pos += AngleVector[orient]directive[[1]]}]
+				];
+			,"forward",
+				pos += AngleVector[orient]directive[[1]];
+			,"Bend",
 				Block[{center, \[Theta]i},
 					Which[
 					directive[[1]] > 0, 
@@ -79,35 +106,47 @@ ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 						\[Theta]i = orient + \[Pi]/2;
 					];
 					AppendTo[output, 
-						Circle[center, directive[[2]], \[Theta]i + {0, directive[[1]]}]
+						CircleFunc[center, directive[[2]], \[Theta]i + {0, directive[[1]]}]
 					];
 					pos = center + AngleVector[\[Theta]i + directive[[1]]]directive[[2]];
 					orient = Mod2\[Pi][orient + directive[[1]]];
-				];,
-			"turn",
-				orient = Mod2\[Pi][orient + directive[[1]]],
+				];
+			,"turn",
+				orient = Mod2\[Pi][orient + directive[[1]]];
 
 			(* 2. *)
-			"mark",
-				AppendTo[marks, directive[[1]] -> pos];,
-			"unmark",
-				Delete[marks, Key[ directive[[1]] ]];,
-			"Goto",
+			,"mark",
+				AppendTo[marks, directive[[1]] -> pos];
+			,"unmark",
+				Delete[marks, Key[ directive[[1]] ]];
+			,"Goto",
 				AppendTo[output,
-					Line[{pos, pos = (1 - directive[[2]])pos + directive[[2]]marks[ directive[[1]] ]}]
-				];,
-			"goto",
-				pos = (1-directive[[2]])pos + directive[[2]]marks[ directive[[1]] ];,
-			"lookat",
-				orient = orient + directive[[2]]Mod2\[Pi][ArcTan@@(marks[ directive[[1]] ] - pos) - orient];,
+					LineFunc[{pos, pos = (1 - directive[[2]])pos + directive[[2]]marks[ directive[[1]] ]}]
+				];
+			,"goto",
+				pos = (1-directive[[2]])pos + directive[[2]]marks[ directive[[1]] ];
+			,"lookat",
+				orient = orient + directive[[2]]Mod2\[Pi][ArcTan@@(marks[ directive[[1]] ] - pos) - orient];
 
 			(* 3. *)
-			"Arrow",
-				AppendTo[output, Arrow[{pos, pos+AngleVector[orient]*0.01}]];,
-			"Text",
-				AppendTo[output, Text[ directive[[1]] , pos, directive[[2]] ]];,
-			"echo",
+			,"Arrow",
+				AppendTo[output, Arrow[{pos, Scaled[AngleVector[orient]*0.01, pos]}]];
+			,"Text",
+				AppendTo[output, Text[ directive[[1]] , pos, directive[[2]]]];
+			,"echo",
 				AppendTo[output, ToExpression[ directive[[1]] ]];
+			,"on",
+				Switch[directive[[1]],
+				"Wavy",
+					LineFunc = WavyLine[#, Sequence@@OptionValue[WavyStyle]]&;
+					CircleFunc = WavyCircle[#1, #2, #3, Sequence@@OptionValue[WavyStyle]]&;
+				];
+			,"off",
+				Switch[directive[[1]],
+				"Wavy",
+					LineFunc = Line;
+					CircleFunc = Circle;
+				];
 			]
 		];
 	(* Start recursion *)
