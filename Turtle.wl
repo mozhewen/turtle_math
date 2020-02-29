@@ -4,78 +4,121 @@ BeginPackage["Turtle`"];
 
 
 (* ::Section:: *)
-(*Parse turtle directives to graphics primitives*)
+(*ParseDirectives[]*)
 
 
-ClearAll[ParseDirective];
-Options[ParseDirective] = {
-	InitialState -> {{0, 0}, 0}, (* {pos, orient} *)
-	"Forward" -> {1},
-	"forward" -> {1},
-	"Bend" -> {\[Pi]/2, 1},
-	"Left" -> {\[Pi]/2},
-	"Right" -> {\[Pi]/2}
+(* ::Text:: *)
+(*All directives are (Drawing directives with the first letter uppercase, non-drawing directives with the first letter lowercase)*)
+(*1. Normal movements*)
+(* 	"Forward"[distance]			Move forward by a certain distance and draw a line.*)
+(*	"forward"[distance]			Move forward without drawing a line.*)
+(*	"Bend"[angle, radius]			angle > 0 ( < 0) bend to the left (right) with a certain radius.*)
+(*	"turn"[angle]					angle > 0 ( < 0) turn left (right).*)
+(**)
+(*2. \:98db\:96f7\:795e\:306e\:8853*)
+(*	"mark"[mark]					Mark the current position.*)
+(*	"unmark"[mark]				Unmark a mark.*)
+(*	"Goto"[mark, [proportion]]		Move to the position of mask and draw a  line. The turtle's orientation is left unchanged.*)
+(*	"goto"[mark, [proportion]]		Move to the position of mask without drawing a line.*)
+(*	"lookat"[mark, [proportion]]		 Set turtle's orientation to the mark.*)
+(**)
+(*3. Extras*)
+(*	"Arrow"[]*)
+(*	"Text"["text", offset]*)
+(*	"echo"["graphics_directives_string"]*)
+(**)
+(*(* TODO: *)*)
+(*	"begin"[context]*)
+(*	"end"[context]*)
+(*	Optimize using "SubstitutionSystem[]" and "AnglePath[]"?*)
+(*	Simplify usage of echo[]*)
+(*	...*)
+
+
+ParseDirectives::usage = "Parse the turtle's directives to Mathematica compatible graphics primitives. ";
+ClearAll[ParseDirectives];
+Options[ParseDirectives] = {
+	InitialState -> {{0, 0}, 0} (* {pos, orient} *)
 };
-ParseDirective[directiveList_List, OptionsPattern[]] := Module[
+
+Begin["`Private`"];
+
+Mod2\[Pi][x_] := Mod[x, 2\[Pi]];
+
+ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 	{
-		stateStack={},
-		pos,orient,(* Stacked properties *)
-		style,(* Unstacked properties *)
-		historyParam=<|
-			"Forward" -> OptionValue["Forward"],
-			"forward" -> OptionValue["forward"],
-			"Bend" -> OptionValue["Bend"],
-			"Left" -> OptionValue["Left"],
-			"Right" -> OptionValue["Right"]
-		|>,
-		output = {},
-		ParseDirectiveRecur
+		stateStack = {},
+		pos, orient, (* Stacked properties *)
+		marks=<||>, (* Unstacked properties *)
+		output = {CapForm["Round"]}, (* Initialized with global directives *)
+		ParseDirectivesRecur
 	},
 	(* Define recursion function *)
-	ParseDirectiveRecur[directive_] := Module[{head = Head[directive], param},
-		If[head === List,
-			AppendTo[stateStack,{pos,orient}]; (* Push *)
-			ParseDirectiveRecur/@directive; (* Parse each item of the list *)
-			{{{pos,orient}},stateStack}=TakeDrop[stateStack,-1]; (* Pop *)
+	ParseDirectivesRecur[directive_] :=
+		If[Head@directive === List,
+			AppendTo[stateStack, {pos, orient}]; (* Push *)
+			ParseDirectivesRecur/@directive; (* Parse each item of the list *)
+			{{{pos, orient}}, stateStack} = TakeDrop[stateStack, -1]; (* Pop *)
 		,(*Else*)
-			If[Length[directive] < 1,
-				param = historyParam[head];,
-				param = directive;
-			];
-			Switch[head,
+			Switch[Head@directive,
+			(* 1. *)
 			"Forward",
 				AppendTo[output,
-					Line[{pos, pos += AngleVector[orient]*param[[1]]}]
+					Line[{pos, pos += AngleVector[orient]directive[[1]]}]
 				];,
 			"forward",
-				pos += ReIm@Exp[I orient]*param[[1]];,
+				pos += AngleVector[orient]directive[[1]];,
 			"Bend",
 				Block[{center, \[Theta]i},
 					Which[
-					param[[1]] > 0, 
-						center = pos + AngleVector[orient+\[Pi]/2]*param[[2]];
-						\[Theta]i = orient-\[Pi]/2;,
-					param[[1]] < 0,
-						center = pos + AngleVector[orient-\[Pi]/2]*param[[2]];
-						\[Theta]i = orient+\[Pi]/2;
+					directive[[1]] > 0, 
+						center = pos + AngleVector[orient + \[Pi]/2] directive[[2]];
+						\[Theta]i = orient - \[Pi]/2;,
+					directive[[1]] < 0,
+						center = pos + AngleVector[orient - \[Pi]/2] directive[[2]];
+						\[Theta]i = orient + \[Pi]/2;
 					];
 					AppendTo[output, 
-						Circle[center, param[[2]], \[Theta]i + {0, param[[1]]}]
+						Circle[center, directive[[2]], \[Theta]i + {0, directive[[1]]}]
 					];
-					pos = center + AngleVector[\[Theta]i+param[[1]]]*param[[2]]; orient += param[[1]];
+					pos = center + AngleVector[\[Theta]i + directive[[1]]]directive[[2]];
+					orient = Mod2\[Pi][orient + directive[[1]]];
 				];,
-			"Left",
-				orient += param[[1]];,
-			"Right",
-				orient -= param[[1]];
+			"turn",
+				orient = Mod2\[Pi][orient + directive[[1]]],
+
+			(* 2. *)
+			"mark",
+				AppendTo[marks, directive[[1]] -> pos];,
+			"unmark",
+				Delete[marks, Key[ directive[[1]] ]];,
+			"Goto",
+				AppendTo[output,
+					Line[{pos, pos = (1 - directive[[2]])pos + directive[[2]]marks[ directive[[1]] ]}]
+				];,
+			"goto",
+				pos = (1-directive[[2]])pos + directive[[2]]marks[ directive[[1]] ];,
+			"lookat",
+				orient = orient + directive[[2]]Mod2\[Pi][ArcTan@@(marks[ directive[[1]] ] - pos) - orient];,
+
+			(* 3. *)
+			"Arrow",
+				AppendTo[output, Arrow[{pos, pos+AngleVector[orient]*0.01}]];,
+			"Text",
+				AppendTo[output, Text[ directive[[1]] , pos, directive[[2]] ]];,
+			"echo",
+				AppendTo[output, ToExpression[ directive[[1]] ]];
 			]
-		]
-	];
-	(* Start iteration *)
-	pos = OptionValue[InitialState][[1]]; orient = OptionValue[InitialState][[2]];
-	ParseDirectiveRecur/@directiveList; (* Parse each item of the list *)
+		];
+	(* Start recursion *)
+	pos = OptionValue[InitialState][[1]];
+	orient = OptionValue[InitialState][[2]];
+	(*   Parse each item of the list *)
+	ParseDirectivesRecur/@directiveList;
 	Return[output];
-]
+];
+
+End[];
 
 
 EndPackage[];
