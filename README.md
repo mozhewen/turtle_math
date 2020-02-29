@@ -1,2 +1,3 @@
-# L-system
-L-systems with Turtle Interpretation (Mathematica version)
+# turtle-math
+
+Mathematica implementation of turtle graphics
