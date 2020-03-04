@@ -12,8 +12,16 @@ BeginPackage["Turtle`"];
 (*1. Normal movements*)
 (* 	"Forward"[distance]			Move forward by a certain distance and draw a line.*)
 (*	"forward"[distance]			Move forward without drawing a line.*)
-(*	"Bend"[angle, radius]			angle > 0 ( < 0) bend to the left (right) with a certain radius.*)
-(*	"turn"[angle]					angle > 0 ( < 0) turn left (right).*)
+(*	"turn"[[angle]]					angle > 0 ( < 0) turn left (right).*)
+(**)
+(*	"Polar"[distance, [angle]]		Abbreviation for "turn"[angle], "Forward"[distance], "turn"[-angle]. *)
+(*	"polar"[distance, [angle]]		Similar to "Polar"[] without drawing a line. *)
+(*	"Cartesian"[dx, dy]				Use  local Cartesian Coordinates to guide movement, where the x-axis points to the front  and y-axis to the right.*)
+(*	"cartesian"[dx, dy]				Similar to "Cartesian"[] without drawing a line.*)
+(*	( You can use "P(p)olar"[distance] which means "P(p)olar"[distance,180\[Degree]] or  to achieve something like "B(b)ackward"[distance]. )*)
+(*	(The "P(p)olar"[] and "C(c)artesian"[] directives do not change the orientation of the turtle. )*)
+(*	*)
+(*	"Bend"[angle, radius]			angle > 0 ( < 0): Make a round bend to the left (right) with a certain radius.*)
 (**)
 (*2. \:98db\:96f7\:795e\:306e\:8853*)
 (*	"mark"[mark]					Mark the current position.*)
@@ -25,15 +33,18 @@ BeginPackage["Turtle`"];
 (*3. Extras*)
 (*	"Arrowhead"[]*)
 (*	"Text"["text", offset]*)
+(**)
+(*4. Stylization*)
 (*	"on"[style, parameters...]*)
 (*	"off"[style]*)
+(**)
+(*5. Raw*)
 (*	"echo"["raw_graphics_directives_string"]*)
-(*	*)
+(**)
 (*(* TODO: *)*)
 (*	Add measurement functions to measure distances and angles between marks.*)
-(*	Add curves.*)
+(*	Add B-spline curves.*)
 (*	Optimize using "SubstitutionSystem[]" and "AnglePath[]"?*)
-(*	Simplify usage of echo[]*)
 (*	...*)
 
 
@@ -51,7 +62,7 @@ Options[ParseDirectives] = {
 Begin["`Private`"];
 
 
-Mod2\[Pi][x_] := Mod[x, 2\[Pi]];
+Mod2\[Pi][x_] := Mod[FullSimplify@x, 2\[Pi]];
 
 
 ClearAll[Outer1];
@@ -136,12 +147,33 @@ ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 		,(*Else*)
 			Switch[Head@directive,
 			(* 1. *)
-			"Forward",
+			"Forward" | "Fd",
 				AppendTo[output,
 					ArrowFunc@LineFunc[{pos, pos += AngleVector[orient]directive[[1]]}]
 				];
-			,"forward",
+			,"forward" | "fd",
 				pos += AngleVector[orient]directive[[1]];
+			,"turn" | "tn",
+				If[Length[directive] >= 1,
+					orient = Mod2\[Pi][orient + directive[[1]] ];,
+					orient = Mod2\[Pi][orient + \[Pi]];
+				]
+			,"Polar" | "Pol",
+				AppendTo[output,
+					If[Length[directive] >= 1,
+						ArrowFunc@LineFunc[{pos, pos += AngleVector[orient + directive[[2]] ]directive[[1]]}],
+						ArrowFunc@LineFunc[{pos, pos -= AngleVector[orient]directive[[1]]}]
+					]
+				];
+			,"polar" | "pol",
+				pos += AngleVector[orient + directive[[2]] ]directive[[1]];
+			,"Cartesian" | "Cart",
+				AppendTo[output,
+					ArrowFunc@LineFunc[{pos, pos += AngleVector[orient]directive[[1]] + AngleVector[orient+\[Pi]/2]directive[[2]]}]
+				];
+			,"cartesian" | "cart",
+				pos += AngleVector[orient]directive[[1]] + AngleVector[orient+\[Pi]/2]directive[[2]];
+
 			,"Bend",
 				Block[{center, \[Theta]i},
 					Which[
@@ -158,8 +190,6 @@ ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 					pos = center + AngleVector[\[Theta]i + directive[[1]]]directive[[2]];
 					orient = Mod2\[Pi][orient + directive[[1]]];
 				];
-			,"turn",
-				orient = Mod2\[Pi][orient + directive[[1]]];
 
 			(* 2. *)
 			,"mark",
@@ -168,12 +198,21 @@ ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 				Delete[marks, Key[ directive[[1]] ]];
 			,"Goto",
 				AppendTo[output,
-					ArrowFunc@LineFunc[{pos, pos = (1 - directive[[2]])pos + directive[[2]]marks[ directive[[1]] ]}]
+					If[Length[directive] >= 2,
+						ArrowFunc@LineFunc[{pos, pos = (1 - directive[[2]])pos + directive[[2]]marks[ directive[[1]] ]}],
+						ArrowFunc@LineFunc[{pos, pos = marks[ directive[[1]] ]}]
+					]
 				];
 			,"goto",
-				pos = (1-directive[[2]])pos + directive[[2]]marks[ directive[[1]] ];
+				If[Length[directive] >= 2,
+					pos = (1 - directive[[2]])pos + directive[[2]]marks[ directive[[1]] ];,
+					pos = marks[ directive[[1]] ];
+				]
 			,"lookat",
-				orient = orient + directive[[2]]Mod2\[Pi][ArcTan@@(marks[ directive[[1]] ] - pos) - orient];
+				If[Length[directive] >= 2,
+					orient = orient + directive[[2]]Mod2\[Pi][ArcTan@@(marks[ directive[[1]] ] - pos) - orient];,
+					orient = ArcTan@@(marks[ directive[[1]] ] - pos);
+				]
 
 			(* 3. *)
 			,"Arrowhead",
@@ -182,8 +221,8 @@ ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 				AppendTo[output,
 					Text[Style[ directive[[1]] , OptionValue[TextStyle]], pos, directive[[2]]]
 				];
-			,"echo",
-				AppendTo[output, ToExpression[ directive[[1]] ]];
+
+			(* 4. Stylization *)
 			,"on",
 				Switch[directive[[1]],
 				"Arrow",
@@ -216,8 +255,13 @@ ParseDirectives[directiveList_List, OptionsPattern[]] := Module[
 					LineFunc = Line;
 					CircleFunc = Circle;
 				];
-			]
+
+			(* Raw *)
+			,"echo",
+				AppendTo[output, ToExpression[ directive[[1]] ]];
+			];
 		];
+
 	(* Start recursion *)
 	pos = OptionValue[InitialState][[1]];
 	orient = OptionValue[InitialState][[2]];
