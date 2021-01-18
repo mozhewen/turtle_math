@@ -1,3 +1,3 @@
-# turtle-math
+# turtle_math
 
-Mathematica implementation of turtle graphics
+A Mathematica implementation of turtle graphics
